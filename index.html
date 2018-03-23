@@ -1,0 +1,1033 @@
+<head>
+	<script type="text/javascript">
+//======================================================================//
+window.onload=main;
+
+//var PREFIX="http://dl.dropbox.com/u/67501358/medievalalien/";
+var PREFIX="";
+
+var WORLD_SIZE=256;
+var TILE_SIZE=16;
+var CONTEXT_WIDTH=320;
+var CONTEXT_HEIGHT=320;
+var TILES_WIDE=20;
+var TILES_HIGH=20;
+var PLAYER_SIZE=32;
+var WALK_SPEED=2;
+var SWORD_SIZE=20;
+var SQUID_RADIUS=16;
+var MAX_HEALTH=300;
+var GIRTH=0.45;
+
+var NORTH=0;
+var EAST=1;
+var SOUTH=2;
+var WEST=3;
+
+var canvas;
+var context2D;
+var images;
+var sounds;
+var world;
+var player;
+var alien;
+var victory;
+
+function swordStrike(xi, yi, xf, yf, vx, vy){
+	for(var i=0; i<world.objects.length;){
+		if(
+			xi<world.objects[i].x+16&&
+			yi<world.objects[i].y+16&&
+			xf>world.objects[i].x-16&&
+			yf>world.objects[i].y-16
+		){
+			--world.objects[i].health;
+			world.objects[i].x+=vx+Math.random()*4-2;
+			world.objects[i].y+=vy+Math.random()*4-2;
+			if(world.objects[i].health==0){
+				world.objects.splice(i, 1);
+				this.sounds.alienDie.pause();
+				this.sounds.alienDie.currentTime=0;
+				this.sounds.alienDie.play();
+			}
+			else{
+				++i;
+				this.sounds.alienHurt.pause();
+				this.sounds.alienHurt.currentTime=0;
+				this.sounds.alienHurt.play();
+			}
+		}
+		else ++i;
+	}
+	var tileX=Math.floor((xi+xf)/2/TILE_SIZE);
+	var tileY=Math.floor((yi+yf)/2/TILE_SIZE);
+	if(world.tiles[tileX][tileY].isNode){
+		alien.killBudsFrom(tileX, tileY);
+		makeDendrite(world.tiles[tileX][tileY]);
+		--alien.numNodes;
+		for(var i=0; i<world.objects.length; ++i)
+			world.objects[i].comeTo(player.x, player.y);
+		if(alien.numNodes==0) victory=true;
+	}
+	else if(world.tiles[tileX][tileY].image==images.flower1) world.tiles[tileX][tileY].image=images.grass1;
+	else if(world.tiles[tileX][tileY].image==images.flower2) world.tiles[tileX][tileY].image=images.grass2;
+	else if(world.tiles[tileX][tileY].image==images.flower1a){
+		world.tiles[tileX][tileY].image=images.dendrite1;
+		world.tiles[tileX][tileY].isPoison=false;
+	}
+	else if(world.tiles[tileX][tileY].image==images.flower2a){
+		world.tiles[tileX][tileY].image=images.dendrite2;
+		world.tiles[tileX][tileY].isPoison=false;
+	}
+}
+
+function Player(sounds){
+	this.x=0;
+	this.y=0;
+	this.upPressed=false;
+	this.downPressed=false;
+	this.leftPressed=false;
+	this.rightPressed=false;
+	this.spacePressed=false;
+	this.frame=0;
+	this.swordFrame=-11;
+	this.painFrame=-100;
+	this.walkPhase=0;
+	this.walkDirection=SOUTH;
+	this.health=MAX_HEALTH;
+	this.poison=0;
+	this.keyDown=function(event){
+		if(event.keyCode==38&&!this.upPressed){
+			this.upPressed=true;
+		}
+		else if(event.keyCode==40&&!this.downPressed){
+			this.downPressed=true;
+		}
+		else if(event.keyCode==37&&!this.leftPressed){
+			this.leftPressed=true;
+		}
+		else if(event.keyCode==39&&!this.rightPressed){
+			this.rightPressed=true;
+		}
+		else if(event.keyCode==32&&!this.spacePressed&&this.frame>this.swordFrame+15){
+			this.sounds.sword.pause();
+			this.sounds.sword.currentTime=0;
+			this.sounds.sword.play();
+			this.spacePressed=true;
+			this.swordFrame=this.frame;
+			if(this.walkDirection==NORTH) swordStrike(this.x-SWORD_SIZE/2, this.y-SWORD_SIZE, this.x+SWORD_SIZE/2, this.y, 0, -8);
+			else if(this.walkDirection==EAST) swordStrike(this.x, this.y-SWORD_SIZE/2, this.x+SWORD_SIZE, this.y+SWORD_SIZE/2, 8, 0);
+			else if(this.walkDirection==SOUTH) swordStrike(this.x-SWORD_SIZE/2, this.y, this.x+SWORD_SIZE/2, this.y+SWORD_SIZE, 0, 8);
+			else if(this.walkDirection==WEST) swordStrike(this.x-SWORD_SIZE, this.y-SWORD_SIZE/2, this.x, this.y+SWORD_SIZE/2, -8, 0);
+		}
+	}
+	this.keyUp=function(event){
+		if(event.keyCode==38) this.upPressed=false;
+		if(event.keyCode==40) this.downPressed=false;
+		if(event.keyCode==37) this.leftPressed=false;
+		if(event.keyCode==39) this.rightPressed=false;
+		if(event.keyCode==32) this.spacePressed=false;
+	}
+	this.update=function(){
+		var walkSpeed=WALK_SPEED;
+		if(!world.tiles[Math.floor(player.x/TILE_SIZE)][Math.floor(player.y/TILE_SIZE)].isGrass)
+			walkSpeed/=2;
+		if(world.tiles[Math.floor(player.x/TILE_SIZE)][Math.floor(player.y/TILE_SIZE)].isPoison)
+			this.poison+=4;
+		if(this.upPressed||(this.poison%29>15)){
+			this.y-=walkSpeed;
+			if(
+				!world.tiles[Math.floor(player.x/TILE_SIZE+GIRTH)][Math.floor(player.y/TILE_SIZE-GIRTH)].passable||
+				!world.tiles[Math.floor(player.x/TILE_SIZE-GIRTH)][Math.floor(player.y/TILE_SIZE-GIRTH)].passable
+			) this.y+=walkSpeed;
+		}
+		if(this.downPressed||(this.poison%31>17)){
+			this.y+=walkSpeed;
+			if(
+				!world.tiles[Math.floor(player.x/TILE_SIZE+GIRTH)][Math.floor(player.y/TILE_SIZE+GIRTH)].passable||
+				!world.tiles[Math.floor(player.x/TILE_SIZE-GIRTH)][Math.floor(player.y/TILE_SIZE+GIRTH)].passable
+			) this.y-=walkSpeed;
+		}
+		if(this.leftPressed||(this.poison%23>11)){
+			this.x-=walkSpeed;
+			if(
+				!world.tiles[Math.floor(player.x/TILE_SIZE-GIRTH)][Math.floor(player.y/TILE_SIZE+GIRTH)].passable||
+				!world.tiles[Math.floor(player.x/TILE_SIZE-GIRTH)][Math.floor(player.y/TILE_SIZE-GIRTH)].passable
+			) this.x+=walkSpeed;
+		}
+		if(this.rightPressed||(this.poison%37>13)){
+			this.x+=walkSpeed;
+			if(
+				!world.tiles[Math.floor(player.x/TILE_SIZE+GIRTH)][Math.floor(player.y/TILE_SIZE+GIRTH)].passable||
+				!world.tiles[Math.floor(player.x/TILE_SIZE+GIRTH)][Math.floor(player.y/TILE_SIZE-GIRTH)].passable
+			) this.x-=walkSpeed;
+		}
+		for(var i=0; i<world.objects.length; ++i)
+			if(Math.abs(this.x-world.objects[i].x)+Math.abs(this.y-world.objects[i].y)<16){
+				this.health-=2;
+				if(this.frame>this.painFrame+15){
+					this.painFrame=this.frame;
+					if(Math.random()<0.5){
+						this.sounds.hurt1.pause();
+						this.sounds.hurt1.currentTime=0;
+						this.sounds.hurt1.play();
+					}
+					else{
+						this.sounds.hurt2.pause();
+						this.sounds.hurt2.currentTime=0;
+						this.sounds.hurt2.play();
+					}
+				}
+			}
+		if(world.tiles[Math.floor(player.x/TILE_SIZE)][Math.floor(player.y/TILE_SIZE)].isTown)
+			if(this.health<MAX_HEALTH)
+				this.health+=1;
+		if(this.poison>300) this.poison=300;
+		if(this.poison>0) --this.poison;
+	}
+	this.render=function(){
+		++this.frame;
+		var frameIndex;
+		if(this.leftPressed||this.rightPressed||this.upPressed||this.downPressed){
+			++this.walkPhase;
+			this.walkPhase%=60;
+			if(this.walkPhase<30){
+				if(this.walkPhase<15) frameIndex=0;
+				else frameIndex=1;
+			}
+			else{
+				if(this.walkPhase<45) frameIndex=0;
+				else frameIndex=2;
+			}
+			if(this.leftPressed) this.walkDirection=WEST;
+			else if(this.rightPressed) this.walkDirection=EAST;
+			else if(this.downPressed) this.walkDirection=SOUTH;
+			else if(this.upPressed) this.walkDirection=NORTH;
+		}
+		else frameIndex=0;
+		if(this.frame<this.swordFrame+10&&this.walkDirection==NORTH){//draw sword first if going N
+			context2D.drawImage(
+				images.sword[this.walkDirection],
+				(CONTEXT_WIDTH-SWORD_SIZE)/2,
+				CONTEXT_WIDTH/2-SWORD_SIZE);
+		}
+		context2D.drawImage(
+			images.player[this.walkDirection][frameIndex],
+			(CONTEXT_WIDTH-PLAYER_SIZE)/2,
+			(CONTEXT_WIDTH-PLAYER_SIZE)/2);
+		if(this.frame<this.swordFrame+10&&this.walkDirection!=NORTH){//draw sword second if not going N
+			if(this.walkDirection==EAST){
+				context2D.drawImage(
+					images.sword[this.walkDirection],
+					CONTEXT_WIDTH/2,
+					(CONTEXT_WIDTH-SWORD_SIZE)/2);
+			}
+			else if(this.walkDirection==SOUTH){
+				context2D.drawImage(
+					images.sword[this.walkDirection],
+					(CONTEXT_WIDTH-SWORD_SIZE)/2,
+					CONTEXT_WIDTH/2);
+			}
+			else if(this.walkDirection==WEST){
+				context2D.drawImage(
+					images.sword[this.walkDirection],
+					CONTEXT_WIDTH/2-SWORD_SIZE,
+					(CONTEXT_WIDTH-SWORD_SIZE)/2);
+			}
+		}
+	}
+	this.sounds=sounds;
+}
+
+function makeNode(tile){
+	if(Math.random()<0.5) tile.image=images.node1;
+	else tile.image=images.node2;
+	tile.passable=false;
+	tile.isGrass=false;
+	tile.isNode=true;
+	this.isTown=false;
+}
+
+function makeDendrite(tile){
+	if(tile.image==images.tree1a) tile.image=images.tree1aa;
+	else if(tile.image==images.tree1b) tile.image=images.tree1ba;
+	else if(tile.image==images.tree1c) tile.image=images.tree1ca;
+	else if(tile.image==images.tree1d) tile.image=images.tree1da;
+	else if(tile.image==images.tree2a) tile.image=images.tree2aa;
+	else if(tile.image==images.tree2b) tile.image=images.tree2ba;
+	else if(tile.image==images.tree2c) tile.image=images.tree2ca;
+	else if(tile.image==images.tree2d) tile.image=images.tree2da;
+	else if(tile.image==images.flower1){
+		tile.image=images.flower1a;
+		tile.isPoison=true;
+	}
+	else if(tile.image==images.flower2){
+		tile.image=images.flower2a;
+		tile.isPoison=true;
+	}
+	else{
+		tile.passable=true;
+		if(Math.random()<0.5) tile.image=images.dendrite1;
+		else tile.image=images.dendrite2;
+	}
+	tile.isGrass=false;
+	tile.isNode=false;
+	tile.isTown=false;
+}
+
+function makeHouse(x, y){
+	world.tiles[x][y].passable=false;
+	world.tiles[x][y].isGrass=false;
+	world.tiles[x][y].isNode=false;
+	world.tiles[x+1][y].isTown=true;
+	world.tiles[x-1][y].isTown=true;
+	world.tiles[x][y+1].isTown=true;
+	world.tiles[x][y-1].isTown=true;
+}
+
+function makeTree(tile){
+	tile.passable=false;
+	tile.isTree=true;
+}
+
+function Bud(x, y, vx, vy){
+	this.x=x+vx;
+	this.y=y+vy;
+	this.age=0;
+	this.vx=vx;
+	this.vy=vy;
+	this.parentX=x;
+	this.parentY=y;
+}
+
+function shuffle(array){
+	var i=array.length;
+	while(i!=0){
+		var j=Math.floor(Math.random()*i);
+		--i;
+		var x=array[i];
+		array[i]=array[j];
+		array[j]=x;
+	}
+	return array;
+};
+
+function addBuds(queue, x, y){
+	var order=shuffle([0, 1, 2, 3]);
+	var chance=1.0;
+	for(var i=0; i<4; ++i){
+		if(Math.random()<chance){
+			if(order[i]==0){
+				if(world.tiles[x+1][y].passable){
+					queue.push(new Bud(x, y, 1, 0));
+					chance/=2;
+				}
+			}
+			else if(order[i]==1){
+				if(world.tiles[x-1][y].passable){
+					queue.push(new Bud(x, y, -1, 0));
+					chance/=2;
+				}
+			}
+			else if(order[i]==2){
+				if(world.tiles[x][y+1].passable){
+					queue.push(new Bud(x, y, 0, 1));
+					chance/=2;
+				}
+			}
+			else if(order[i]==3){
+				if(world.tiles[x][y-1].passable){
+					queue.push(new Bud(x, y, 0, -1));
+					chance/=2;
+				}
+			}
+		}
+	}
+}
+
+function grow(bud){
+	if(bud.x<0||bud.x>=WORLD_SIZE||bud.y<0||bud.y>=WORLD_SIZE) return false;
+	if(world.tiles[bud.x][bud.y].isGrass){
+		makeDendrite(world.tiles[bud.x][bud.y]);
+		++bud.age;
+		return true;
+	}
+	var r=Math.random();
+	if(bud.vx!=0){
+		bud.x+=bud.vx;
+		if(r<0.3) --bud.y;
+		else if(r>0.7) ++bud.y;
+	}
+	else if(bud.vy!=0){
+		bud.y+=bud.vy;
+		if(r<0.3) --bud.x;
+		else if(r>0.7) ++bud.x;
+	}
+	return true;
+}
+
+function Alien(x, y){
+	this.restTime=0;
+	this.queue=[];
+	this.numNodes=1;
+	addBuds(this.queue, x, y);
+	this.update=function(fast){
+		if(!fast){
+			this.restTime+=Math.min(100, this.numNodes+4);
+			if(this.restTime<200) return;
+		}
+		this.restTime=0;
+		if(this.queue.length==0) return;
+		var i=Math.floor(Math.random()*(this.queue.length-0.1));
+		var bud=this.queue[i];
+		if(!grow(bud)){
+			this.queue.splice(i, 1);
+		}
+		else if(bud.age==8){
+			this.queue.splice(i, 1);
+			if(world.tiles[bud.x][bud.y].passable){
+				makeNode(world.tiles[bud.x][bud.y]);
+				if(world.tiles[bud.x][bud.y+1].passable)
+					new Squid(bud.x*TILE_SIZE, (bud.y+1)*TILE_SIZE);
+				++this.numNodes;
+				addBuds(this.queue, bud.x, bud.y);
+			}
+		}
+	}
+	this.killBudsFrom=function(x, y){
+		for(var i=0; i<this.queue.length;)
+			if(this.queue[i].parentX==x&&this.queue[i].parentY==y)
+				this.queue.splice(i, 1);
+			else ++i;
+	}
+}
+
+function Squid(x, y){
+	this.x=x;
+	this.y=y;
+	this.vx=0;
+	this.vy=0;
+	this.health=3;
+	this.phase=0;
+	this.moviness=50+Math.floor(Math.random()*1000);
+	this.currentMove=0;
+	this.update=function(){
+		var m=1;
+		if(
+			world.tiles[Math.floor(this.x/TILE_SIZE)][Math.floor(this.y/TILE_SIZE)].passable&&
+			!world.tiles[Math.floor(this.x/TILE_SIZE)][Math.floor(this.y/TILE_SIZE)].isGrass
+		) m=2;
+		this.x+=this.vx*m;
+		if(!world.tiles[Math.floor(this.x/TILE_SIZE)][Math.floor(this.y/TILE_SIZE)].passable)
+			this.x-=this.vx*m;
+		this.y+=this.vy*m;
+		if(!world.tiles[Math.floor(this.x/TILE_SIZE)][Math.floor(this.y/TILE_SIZE)].passable)
+			this.y-=this.vy*m;
+		var tooClose=false;
+		for(var i=0; i<world.objects.length; ++i)
+			if(this.id!=world.objects[i].id)
+				if(Math.abs(this.x-world.objects[i].x)+Math.abs(this.y-world.objects[i].y)<50){
+					tooClose=true;
+					if(this.x>world.objects[i].x) this.vx=1;
+					else this.vx=-1;
+					if(this.y>world.objects[i].y) this.vy=1;
+					else this.vy=-1;
+				}
+		if(!tooClose){
+			var playerDist=Math.abs(player.x-this.x)+Math.abs(player.y-this.y);
+			if(
+				playerDist<75
+			){
+				if(this.x<player.x-1) this.vx=1;
+				else if(this.x>player.x+1) this.vx=-1;
+				else this.vx=0;
+				if(this.y<player.y-1) this.vy=1;
+				else if(this.y>player.y+1) this.vy=-1;
+				else this.vy=0;
+			}
+			else if(this.currentMove<this.moviness) ++this.currentMove;
+			else if(
+				playerDist<200&&
+				(
+					(
+						m==2&&
+						!world.tiles[Math.floor(player.x/TILE_SIZE)][Math.floor(player.y/TILE_SIZE)].isGrass
+					)||
+					world.tiles[Math.floor(this.x/TILE_SIZE)][Math.floor(this.y/TILE_SIZE)].isGrass
+				)
+			){
+				this.comeTo(player.x+(Math.random()-0.5)*playerDist, player.y+(Math.random()-0.5)*playerDist);
+			}
+			else{
+				this.vx=0;
+				this.vy=0;
+				if(Math.random()<0.001){
+					this.vx=Math.random()-0.5;
+					this.vy=Math.random()-0.5;
+					this.currentMove=0;
+				}
+			}
+		}
+	}
+	this.render=function(){
+		++this.phase;
+		this.phase%=30;
+		if(this.phase<15)
+			context2D.drawImage(
+				images.squid1,
+				this.x-player.x-SQUID_RADIUS+CONTEXT_WIDTH/2,
+				this.y-player.y-SQUID_RADIUS+CONTEXT_HEIGHT/2);
+		else
+			context2D.drawImage(
+				images.squid2,
+				this.x-player.x-SQUID_RADIUS+CONTEXT_WIDTH/2,
+				this.y-player.y-SQUID_RADIUS+CONTEXT_HEIGHT/2);
+	}
+	this.comeTo=function(destX, destY){
+		this.vx=destX-this.x;
+		this.vy=destY-this.y;
+		var r=Math.sqrt(this.vx*this.vx+this.vy*this.vy);
+		this.vx/=r;
+		this.vy/=r;
+		this.currentMove=0;
+	}
+	this.sounds=sounds;
+	this.id=world.objects.length;
+	world.objects.push(this);
+}
+
+function Images(){
+	this.grass1=new Image();
+	this.grass1.src=PREFIX+"graphics/tiles/grass1.png";
+	this.grass2=new Image();
+	this.grass2.src=PREFIX+"graphics/tiles/grass2.png";
+	this.water1=new Image();
+	this.water1.src=PREFIX+"graphics/tiles/water1.png";
+	this.water2=new Image();
+	this.water2.src=PREFIX+"graphics/tiles/water2.png";
+	this.shore=[]
+	for(var i=0; i<=45; ++i){
+		this.shore[i]=new Image();
+		this.shore[i].src=PREFIX+"graphics/tiles/shore"+i.toString()+".bmp";
+	}
+	this.player=new Array(4);
+	this.sword=new Array(4);
+	for(var i=0; i<4; ++i){
+		var m;
+		if(i==0) m="N";
+		else if(i==1) m="E";
+		else if(i==2) m="S";
+		else if(i==3) m="W";
+		this.player[i]=new Array(3);
+		this.player[i][0]=new Image();
+		this.player[i][0].src=PREFIX+"graphics/characters/player/player"+m+".png";
+		this.player[i][1]=new Image();
+		this.player[i][1].src=PREFIX+"graphics/characters/player/player"+m+"1.png";
+		this.player[i][2]=new Image();
+		this.player[i][2].src=PREFIX+"graphics/characters/player/player"+m+"2.png";
+		this.sword[i]=new Image();
+		this.sword[i].src=PREFIX+"graphics/sword/sword"+m+".png";
+	}
+	this.squid1=new Image();
+	this.squid1.src=PREFIX+"graphics/characters/squid/squid1.png";
+	this.squid2=new Image();
+	this.squid2.src=PREFIX+"graphics/characters/squid/squid2.png";
+	this.node1=new Image();
+	this.node1.src=PREFIX+"graphics/tiles/node1.png";
+	this.node2=new Image();
+	this.node2.src=PREFIX+"graphics/tiles/node2.png";
+	this.dendrite1=new Image();
+	this.dendrite1.src=PREFIX+"graphics/tiles/dendrite1.png";
+	this.dendrite2=new Image();
+	this.dendrite2.src=PREFIX+"graphics/tiles/dendrite2.png";
+	this.door=new Image();
+	this.door.src=PREFIX+"graphics/tiles/door.png";
+	this.wall=new Image();
+	this.wall.src=PREFIX+"graphics/tiles/wall.png";
+	this.roof=new Image();
+	this.roof.src=PREFIX+"graphics/tiles/roof.png";
+	this.rooffront=new Image();
+	this.rooffront.src=PREFIX+"graphics/tiles/rooffront.png";
+	this.roofback=new Image();
+	this.roofback.src=PREFIX+"graphics/tiles/roofback.png";
+	this.tree1a=new Image();
+	this.tree1a.src=PREFIX+"graphics/tiles/tree1a.png";
+	this.tree1b=new Image();
+	this.tree1b.src=PREFIX+"graphics/tiles/tree1b.png";
+	this.tree1c=new Image();
+	this.tree1c.src=PREFIX+"graphics/tiles/tree1c.png";
+	this.tree1d=new Image();
+	this.tree1d.src=PREFIX+"graphics/tiles/tree1d.png";
+	this.tree2a=new Image();
+	this.tree2a.src=PREFIX+"graphics/tiles/tree2a.png";
+	this.tree2b=new Image();
+	this.tree2b.src=PREFIX+"graphics/tiles/tree2b.png";
+	this.tree2c=new Image();
+	this.tree2c.src=PREFIX+"graphics/tiles/tree2c.png";
+	this.tree2d=new Image();
+	this.tree2d.src=PREFIX+"graphics/tiles/tree2d.png";
+	this.tree1aa=new Image();
+	this.tree1aa.src=PREFIX+"graphics/tiles/tree1aa.png";
+	this.tree1ba=new Image();
+	this.tree1ba.src=PREFIX+"graphics/tiles/tree1ba.png";
+	this.tree1ca=new Image();
+	this.tree1ca.src=PREFIX+"graphics/tiles/tree1ca.png";
+	this.tree1da=new Image();
+	this.tree1da.src=PREFIX+"graphics/tiles/tree1da.png";
+	this.tree2aa=new Image();
+	this.tree2aa.src=PREFIX+"graphics/tiles/tree2aa.png";
+	this.tree2ba=new Image();
+	this.tree2ba.src=PREFIX+"graphics/tiles/tree2ba.png";
+	this.tree2ca=new Image();
+	this.tree2ca.src=PREFIX+"graphics/tiles/tree2ca.png";
+	this.tree2da=new Image();
+	this.tree2da.src=PREFIX+"graphics/tiles/tree2da.png";
+	this.flower1=new Image();
+	this.flower1.src=PREFIX+"graphics/tiles/flower1.png";
+	this.flower1a=new Image();
+	this.flower1a.src=PREFIX+"graphics/tiles/flower1a.png";
+	this.flower2=new Image();
+	this.flower2.src=PREFIX+"graphics/tiles/flower2.png";
+	this.flower2a=new Image();
+	this.flower2a.src=PREFIX+"graphics/tiles/flower2a.png";
+}
+
+function Sounds(){
+	this.sword=document.createElement("audio");
+	this.sword.setAttribute("src", PREFIX+"sounds/sword.wav");
+	this.sword.load();
+	this.alienHurt=document.createElement("audio");
+	this.alienHurt.setAttribute("src", PREFIX+"sounds/alienhurt.wav");
+	this.alienHurt.load();
+	this.alienDie=document.createElement("audio");
+	this.alienDie.setAttribute("src", PREFIX+"sounds/aliendie.wav");
+	this.alienDie.load();
+	this.hurt1=document.createElement("audio");
+	this.hurt1.setAttribute("src", PREFIX+"sounds/oo.wav");
+	this.hurt1.load();
+	this.hurt2=document.createElement("audio");
+	this.hurt2.setAttribute("src", PREFIX+"sounds/ng.wav");
+	this.hurt2.load();
+}
+
+function Tile(image, passable, isGrass, isNode){
+	this.image=image;
+	this.passable=passable;
+	this.isGrass=isGrass;
+	this.isNode=isNode;
+	this.isTown=false;
+	this.isTree=false;
+	this.isPoison=false;
+}
+
+var NONE=0;
+var N=1;
+var E=2;
+var S=3;
+var W=4;
+var NE=5;
+var SE=6;
+var SW=7;
+var NW=8;
+var N_E=9;
+var N_S=10;
+var N_W=11;
+var E_S=12;
+var E_W=13;
+var S_W=14;
+var N_SE=15;
+var N_SW=16;
+var E_SW=17;
+var E_NW=18;
+var S_NW=19;
+var S_NE=20;
+var W_NE=21;
+var W_SE=22;
+var NE_SE=23;
+var NE_SW=24;
+var NE_NW=25;
+var SE_SW=26;
+var SE_NW=27;
+var SW_NW=28;
+var N_E_S=29;
+var E_S_W=30;
+var S_W_N=31;
+var W_N_E=32;
+var N_E_SW=33;
+var E_S_NW=34;
+var S_W_NE=35;
+var W_N_SE=36;
+var N_SE_SW=37;
+var E_SW_NW=38;
+var S_NW_NE=39;
+var W_NE_SE=40;
+var NE_SE_SW=41;
+var SE_SW_NW=42;
+var SW_NW_NE=43;
+var NW_NE_SE=44;
+var N_E_S_W=45;
+var NE_SE_SW_NW=46;
+var MODIFIERS=47;
+
+function getModifier(n, ne, e, se, s, sw, w, nw){
+	if(n){
+		if(e){
+			if(s){
+				if(w) return N_E_S_W;
+				else return N_E_S;
+			}
+			else{//no s
+				if(w) return W_N_E;
+				else{//no w
+					if(sw) return N_E_SW;
+					else return N_E;
+				}
+			}
+		}
+		else{//no e
+			if(s){
+				if(w) return S_W_N;
+				else return N_S;
+			}
+			else{//no s
+				if(w){
+					if(se) return W_N_SE;
+					return N_W;
+				}
+				else{//no w
+					if(se){
+						if(sw) return N_SE_SW;
+						else return N_SE;
+					}
+					else{//no se
+						if(sw) return N_SW;
+						else return N;
+					}
+				}
+			}
+		}
+	}
+	else{//no n
+		if(e){
+			if(s){
+				if(w) return E_S_W;
+				else{//no w
+					if(nw) return E_S_NW;
+					else return E_S;
+				}
+			}
+			else{//no s
+				if(w) return E_W;
+				else{//no w
+					if(sw){
+						if(nw) return E_SW_NW;
+						else return E_SW;
+					}
+					else{//no sw
+						if(nw) return E_NW;
+						else return E;
+					}
+				}
+			}
+		}
+		else{//no e
+			if(s){
+				if(w){
+					if(ne) return S_W_NE;
+					else return S_W;
+				}
+				else{//no w
+					if(ne){
+						if(nw) return S_NW_NE;
+						else return S_NE;
+					}
+					else{//no ne
+						if(nw) return S_NW;
+						else return S;
+					}
+				}
+			}
+			else{//no s
+				if(w){
+					if(ne){
+						if(se) return W_NE_SE;
+						else return W_NE;
+					}
+					else{//no ne
+						if(se) return W_SE;
+						else return W;
+					}
+				}
+				else{//no w
+					if(ne){
+						if(se){
+							if(sw){
+								if(nw) return NE_SE_SW_NW;
+								else return NE_SE_SW;
+							}
+							else{//no sw
+								if(nw) return NW_NE_SE;
+								else return NE_SE;
+							}
+						}
+						else{//no se
+							if(sw){
+								if(nw) return SW_NW_NE;
+								else return NE_SW;
+							}
+							else{//no sw
+								if(nw) return NE_NW;
+								else return NE;
+							}
+						}
+					}
+					else{//no ne
+						if(se){
+							if(sw){
+								if(nw) return SE_SW_NW;
+								else return SE_SW;
+							}
+							else{//no sw
+								if(nw) return SE_NW;
+								else return SE;
+							}
+						}
+						else{//no se
+							if(sw){
+								if(nw) return SW_NW;
+								else return SW;
+							}
+							else{//no sw
+								if(nw) return NW;
+								else return NONE;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return NONE;
+}
+
+function World(){
+	var height=[];
+	var noise=[];
+	for(var i=0; i<WORLD_SIZE/16; ++i){
+		noise[i]=[];
+		for(var j=0; j<WORLD_SIZE/16; ++j)
+			noise[i][j]=Math.random()*WORLD_SIZE*WORLD_SIZE/8;
+	}
+	for(var i=0; i<WORLD_SIZE; ++i){
+		height[i]=[];
+		for(var j=0; j<WORLD_SIZE; ++j){
+			height[i][j]=-(j-WORLD_SIZE/2)*(j-WORLD_SIZE/2)-(i-WORLD_SIZE/2)*(i-WORLD_SIZE/2)+WORLD_SIZE*WORLD_SIZE/8;
+			var i1=Math.floor(i/16);
+			var i2=(i1+1)%(WORLD_SIZE/16);
+			var h=i/16.0-i1;
+			var j1=Math.floor(j/16);
+			var j2=(j1+1)%(WORLD_SIZE/16);
+			var v=j/16.0-j1;
+			var top=noise[i1][j1]*(1-h)+noise[i2][j1]*h;
+			var bottom=noise[i1][j2]*(1-h)+noise[i2][j2]*h;
+			var middle=top*(1-v)+bottom*v;
+			height[i][j]+=middle;
+		}
+	}
+	this.tiles=[];
+	for(var i=0; i<WORLD_SIZE; ++i){
+		this.tiles[i]=[]
+		for(var j=0; j<WORLD_SIZE; ++j){
+			if(height[i][j]>0.0){
+				if(Math.random()<0.01){
+					if(Math.random()<0.5) this.tiles[i][j]=new Tile(images.flower1, true, true, false);
+					else this.tiles[i][j]=new Tile(images.flower2, true, true, false);
+				}
+				else{
+					if(Math.random()<0.5) this.tiles[i][j]=new Tile(images.grass1, true, true, false);
+					else this.tiles[i][j]=new Tile(images.grass2, true, true, false);
+				}
+			}
+			else{
+				if(Math.random()<0.5) this.tiles[i][j]=new Tile(images.water1, false, false, false);
+				else this.tiles[i][j]=new Tile(images.water2, false, false, false);
+			}
+		}
+	}
+	for(var i=1; i<WORLD_SIZE-1; ++i)
+		for(var j=1; j<WORLD_SIZE-1; ++j)
+			if(!this.tiles[i][j].isGrass){
+				var n=this.tiles[i][j-1].isGrass;
+				var ne=this.tiles[i+1][j-1].isGrass;
+				var e=this.tiles[i+1][j].isGrass;
+				var se=this.tiles[i+1][j+1].isGrass;
+				var s=this.tiles[i][j+1].isGrass;
+				var sw=this.tiles[i-1][j+1].isGrass;
+				var w=this.tiles[i-1][j].isGrass;
+				var nw=this.tiles[i-1][j-1].isGrass;
+				var modifier=getModifier(n, ne, e, se, s, sw, w, nw);
+				if(modifier!=0)
+					this.tiles[i][j].image=images.shore[modifier-1];
+			}
+	this.objects=[];
+	this.placeHouse=function(x, y){
+		if(x<10||x>=WORLD_SIZE-10||y<10||y>=WORLD_SIZE-10) return false;
+		var w=3+Math.floor(Math.random()*4);
+		var h=1+Math.floor(Math.random()*1);
+		var d=2+Math.floor(Math.random()*3);
+		for(var i=-1; i<w+1; ++i)
+			for(var j=-1; j<h+d+1; ++j)
+				if(!this.tiles[x+i][y+j].passable||this.tiles[x+i][y+j].isTown)
+					return false;
+		for(var i=0; i<w; ++i){
+			makeHouse(x+i, y);
+			world.tiles[x+i][y].image=images.roofback;
+			for(var j=1; j<d-1; ++j){
+				makeHouse(x+i, y+j);
+				world.tiles[x+i][y+j].image=images.roof;
+			}
+			makeHouse(x+i, y+d-1);
+			world.tiles[x+i][y+d-1].image=images.rooffront;
+			for(var j=d; j<d+h; ++j){
+				makeHouse(x+i, y+j);
+				if(i==Math.floor(w/2)) world.tiles[x+i][y+j].image=images.door;
+				else world.tiles[x+i][y+j].image=images.wall;
+			}
+		}
+		return true;
+	}
+	this.generateTown=function(x, y){
+		world.tiles[x][y].isTown=true;
+		var housesPlaced=0;
+		var housesToPlace=5+Math.random()*5;
+		var trial=0;
+		while(housesPlaced<housesToPlace){
+			if(this.placeHouse(Math.floor(x+Math.cos(trial)*trial), Math.floor(y+Math.sin(trial)*trial)))
+				++housesPlaced;
+			++trial;
+		}
+	}
+	this.placeTree=function(x, y){
+		if(x<2||x>=WORLD_SIZE-2||y<2||y>=WORLD_SIZE-2) return;
+		if(!world.tiles[x-1][y].isGrass||world.tiles[x-1][y].isTree) return;
+		if(!world.tiles[x][y-1].isGrass||world.tiles[x][y-1].isTree) return;
+		if(!world.tiles[x+1][y-1].isGrass||world.tiles[x+1][y-1].isTree) return;
+		if(!world.tiles[x+2][y].isGrass||world.tiles[x+2][y].isTree) return;
+		if(!world.tiles[x+2][y+1].isGrass||world.tiles[x+2][y+1].isTree) return;
+		if(!world.tiles[x+1][y+2].isGrass||world.tiles[x+1][y+2].isTree) return;
+		if(!world.tiles[x][y+2].isGrass||world.tiles[x][y+1].isTree) return;
+		if(!world.tiles[x-1][y+1].isGrass||world.tiles[x-1][y+1].isTree) return;
+		makeTree(world.tiles[x][y]);
+		makeTree(world.tiles[x+1][y]);
+		makeTree(world.tiles[x][y+1]);
+		makeTree(world.tiles[x+1][y+1]);
+		if(Math.random()<0.5){
+			world.tiles[x][y].image=images.tree1a;
+			world.tiles[x+1][y].image=images.tree1b;
+			world.tiles[x][y+1].image=images.tree1c;
+			world.tiles[x+1][y+1].image=images.tree1d;
+		}
+		else{
+			world.tiles[x][y].image=images.tree2a;
+			world.tiles[x+1][y].image=images.tree2b;
+			world.tiles[x][y+1].image=images.tree2c;
+			world.tiles[x+1][y+1].image=images.tree2d;
+		}
+	}
+	this.generateForest=function(x, y, size){
+		var angle=0;
+		for(var i=0; i<size; ++i){
+			this.placeTree(Math.floor(x+Math.cos(angle)*i/4), Math.floor(y+Math.sin(angle)*i/4));
+			angle+=Math.random()*10;
+		}
+	}
+	this.generateForests=function(){
+		for(var i=0; i<10; ++i)
+			this.generateForest(
+				Math.floor(Math.random()*WORLD_SIZE),
+				Math.floor(Math.random()*WORLD_SIZE),
+				Math.floor(Math.random()*WORLD_SIZE/2)
+			)
+	}
+}
+
+function render(){
+	if(player.health<=0){
+		context2D.fillStyle="#000000";
+		context2D.fillRect(0, 0, CONTEXT_WIDTH, CONTEXT_HEIGHT);
+		context2D.fillStyle="#FF0000";
+		context2D.textAlign="center";
+		context2D.fillText("You died.", CONTEXT_WIDTH/2, CONTEXT_HEIGHT/4, CONTEXT_WIDTH/2);
+		return;
+	}
+	else if(victory){
+		context2D.fillStyle="#000000";
+		context2D.fillRect(0, 0, CONTEXT_WIDTH, CONTEXT_HEIGHT);
+		context2D.fillStyle="#00FFFF";
+		context2D.textAlign="center";
+		context2D.fillText("You win!", CONTEXT_WIDTH/2, CONTEXT_HEIGHT/4, CONTEXT_WIDTH/2);
+		return;
+	}
+	player.update();
+	alien.update(false);
+	for(var i=0; i<TILES_WIDE+1; ++i)
+		for(var j=0; j<TILES_HIGH+1; ++j)
+			context2D.drawImage(
+				world.tiles[i-TILES_WIDE/2+Math.floor(player.x/TILE_SIZE)][j-TILES_HIGH/2+Math.floor(player.y/TILE_SIZE)].image,
+				i*TILE_SIZE-player.x%TILE_SIZE,
+				j*TILE_SIZE-player.y%TILE_SIZE);
+	player.render();
+	for(var i=0; i<world.objects.length; ++i){
+		world.objects[i].update();
+		world.objects[i].render();
+	}
+	context2D.fillStyle="#FF0000";
+	context2D.fillRect(10, CONTEXT_HEIGHT-10, player.health, 3);
+}
+
+function main(){
+	victory=false;
+	canvas=document.getElementById('canvas');
+	context2D=canvas.getContext('2d');
+	images=new Images();
+	sounds=new Sounds();
+	world=new World(images);
+	player=new Player(sounds);
+	var x, y;
+	while(true){
+		x=Math.floor(Math.random()*WORLD_SIZE);
+		y=Math.floor(Math.random()*WORLD_SIZE);
+		if(Math.abs(x-WORLD_SIZE/2)+Math.abs(y-WORLD_SIZE/2)>WORLD_SIZE/4&&world.tiles[x][y].passable) break;
+	}
+	player.x=x*TILE_SIZE+TILE_SIZE/2;
+	player.y=y*TILE_SIZE+TILE_SIZE/2;
+	world.generateTown(x, y);
+	world.generateForests();
+	while(true){
+		x=Math.floor(Math.random()*WORLD_SIZE);
+		y=Math.floor(Math.random()*WORLD_SIZE);
+		if(Math.abs(x-player.x/TILE_SIZE)+Math.abs(y-player.y/TILE_SIZE)>WORLD_SIZE/2&&world.tiles[x][y].passable) break;
+	}
+	makeNode(world.tiles[x][y]);
+	alien=new Alien(x, y);
+	for(var i=0; i<256; ++i)
+		alien.update(true);
+	for(var i=0; i<5; ++i){
+		var sx, sy;
+		sx=x+Math.floor(Math.random()*11)-5;
+		sy=y+Math.floor(Math.random()*11)-5;
+		if(world.tiles[sx][sy].passable)
+			new Squid(sx*TILE_SIZE, sy*TILE_SIZE);
+	}
+	document.onkeydown=function(event){ player.keyDown(event); }
+	document.onkeyup=function(event){ player.keyUp(event); }
+	setInterval(render, 30);
+}
+//======================================================================//
+	</script>
+</head>
+<body>
+	<canvas id="canvas" width="320" height="320">
+		<p>Your browser does not support the canvas element.</p>
+	</canvas>
+</body>
