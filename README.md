@@ -1,0 +1,2 @@
+- https://dansgithubuser.github.io/medieval-alien/
+- https://dansonlinepresence.wordpress.com/2012/03/21/medieval-alien/
